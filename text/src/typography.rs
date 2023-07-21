@@ -32,7 +32,7 @@ pub enum PlaceLineDirection {
 pub struct TypographyCfg {
   pub line_height: Option<Em>,
   pub letter_space: Option<Pixel>,
-  pub text_align: Option<TextAlign>,
+  pub text_align: TextAlign,
   // The size glyphs can place, and hint `TypographyMan` where to early return.
   // the result of typography may over bounds.
   pub bounds: Size<Em>,
@@ -131,7 +131,7 @@ where
   }
 
   fn adjust_lines(&mut self, visual_width: Em, visual_height: Em) -> (Em, Em) {
-    let text_align = self.cfg.text_align.unwrap_or(TextAlign::Start);
+    let text_align = self.cfg.text_align;
 
     let bounds_width = self.cfg.bounds.width;
     let bounds_height = self.cfg.bounds.height;
@@ -243,7 +243,7 @@ where
     run: &Runs::Item,
     inner_cursor: &mut impl InlineCursor,
   ) {
-    if self.cfg.text_align != Some(TextAlign::Center) {
+    if self.cfg.text_align != TextAlign::Center {
       let bounds = if self.cfg.line_dir.is_horizontal() {
         self.cfg.bounds.height
       } else {
@@ -407,7 +407,7 @@ where
 }
 
 pub struct InputParagraph<Runs> {
-  pub text_align: Option<TextAlign>,
+  pub text_align: TextAlign,
   pub runs: Runs,
 }
 

@@ -30,7 +30,7 @@ pub struct TypographyKey {
   /// detect if a cache can be reuse even if its bounds is different.
   pub line_width: Em,
   pub letter_space: Option<Pixel>,
-  pub text_align: Option<TextAlign>,
+  pub text_align: TextAlign,
   pub line_dir: PlaceLineDirection,
   pub overflow: Overflow,
   pub text: Substr,
@@ -131,7 +131,7 @@ impl TypographyStore {
     let t_cfg = TypographyCfg {
       line_height: input.line_height,
       letter_space: input.letter_space,
-      text_align: input.text_align,
+      text_align: cfg.text_align,
       bounds,
       line_dir: input.line_dir,
       overflow: input.overflow,
