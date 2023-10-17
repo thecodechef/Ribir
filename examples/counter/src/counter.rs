@@ -2,20 +2,14 @@ use ribir::prelude::*;
 
 pub fn counter() -> impl WidgetBuilder {
   fn_widget! {
-    let cnt = Stateful::new(0);
+    let count = State::value(0);
 
-    @Column {
-      h_align: HAlign::Center,
-      align_items: Align::Center,
+    @Row {
       @FilledButton {
-        on_tap: move |_: &mut _| *$cnt.write() += 1,
-        @{ Label::new("Add") }
+        on_tap: move |_| *$count.write() += 1,
+        @ { Label::new("Increment") }
       }
-      @H1 { text: pipe!($cnt.to_string())  }
-      @FilledButton {
-        on_tap: move |_: &mut _| *$cnt.write() += -1,
-        @{ Label::new("Sub") }
-      }
+      @H1 { text: pipe!($count.to_string()) }
     }
   }
 }

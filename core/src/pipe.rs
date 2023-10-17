@@ -38,6 +38,22 @@ pub trait Pipe {
   {
     MapPipe { source: self, f: Box::new(f) }
   }
+
+  /// Chain more operations on the pipe value stream by applying the `f` on the
+  /// final value stream. This is a lazy operation, it will not execute the `f`
+  /// until the pipe is be subscribed.
+  fn value_chain<R: BoxIt<BoxOp<'static, (ModifyScope, Self::Value), Infallible>>>(
+    self,
+    f: impl FnOnce(ValueStream<Self::Value>) -> R + 'static,
+  ) -> FinalChain<Self::Value, Self>
+  where
+    Self: Sized,
+  {
+    FinalChain {
+      source: self,
+      f: Box::new(|v| f(v).box_it()),
+    }
+  }
 }
 
 pub(crate) trait InnerPipe: Pipe {
@@ -47,19 +63,6 @@ pub(crate) trait InnerPipe: Pipe {
     tap_before_all: impl Fn(&Window) + 'static,
     ctx: &BuildCtx,
   ) -> (Self::Value, ValueStream<Self::Value>);
-
-  /// Chain more operations on the pipe value stream by applying the `f` on the
-  /// final value stream. This a lazy operation, it will not execute the `f`
-  /// until the pipe is be subscribed.
-  fn final_stream_chain<F>(
-    self,
-    f: impl FnOnce(ValueStream<Self::Value>) -> ValueStream<Self::Value> + 'static,
-  ) -> FinalChain<Self::Value, Self>
-  where
-    Self: Sized,
-  {
-    FinalChain { source: self, f: Box::new(f) }
-  }
 
   fn build(
     self,
