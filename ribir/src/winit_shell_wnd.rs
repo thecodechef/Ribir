@@ -1,4 +1,4 @@
-use crate::backends::*;
+use crate::{backends::*, prelude::request_redraw};
 
 use ribir_core::{
   prelude::{image::ColorFormat, *},
@@ -52,13 +52,22 @@ impl ShellWindow for WinitShellWnd {
     Size::new(size.width, size.height)
   }
 
-  fn set_size(&mut self, size: Size) {
-    if self.inner_size() != size {
-      self
-        .winit_wnd
-        .set_inner_size(LogicalSize::new(size.width, size.height));
-      self.on_resize(size)
+  fn request_resize(&mut self, size: Size) {
+    let size = self
+      .winit_wnd
+      .request_inner_size(LogicalSize::new(size.width, size.height))
+      .map(|size| Size::new(size.width as f32, size.height as f32));
+    if let Some(size) = size {
+      self.on_resize(size);
+      if let Some(wnd) = AppCtx::get_window(self.id()) {
+        request_redraw(&wnd);
+      }
     }
+  }
+
+  fn on_resize(&mut self, size: Size) {
+    let size: DeviceSize = (size * self.device_pixel_ratio()).to_i32().cast_unit();
+    self.backend.on_resize(size);
   }
 
   fn set_min_size(&mut self, size: Size) {
@@ -88,9 +97,10 @@ impl ShellWindow for WinitShellWnd {
   }
 
   #[inline]
-  fn set_ime_pos(&mut self, pos: Point) {
-    let position: LogicalPosition<f32> = LogicalPosition::new(pos.x, pos.y);
-    self.winit_wnd.set_ime_position(position);
+  fn set_ime_cursor_area(&mut self, rect: &Rect) {
+    let position: LogicalPosition<f32> = LogicalPosition::new(rect.origin.x, rect.origin.y);
+    let size: LogicalSize<f32> = LogicalSize::new(rect.size.width, rect.size.height);
+    self.winit_wnd.set_ime_cursor_area(position, size);
 
     // tmp: winit set_ime_position fail when use sogou ime in window
     // platform, issue link: https://github.com/rust-windowing/winit/issues/2780
@@ -102,6 +112,34 @@ impl ShellWindow for WinitShellWnd {
       SetCaretPos(pos.x, pos.y);
     }
   }
+
+  #[inline]
+  fn set_visible(&mut self, visible: bool) { self.winit_wnd.set_visible(visible) }
+
+  #[inline]
+  fn set_resizable(&mut self, resizable: bool) { self.winit_wnd.set_resizable(resizable) }
+
+  #[inline]
+  fn is_resizable(&self) -> bool { self.winit_wnd.is_resizable() }
+
+  #[inline]
+  fn is_minimized(&self) -> bool { self.winit_wnd.is_minimized().unwrap_or_default() }
+
+  #[inline]
+  fn set_minimized(&mut self, minimized: bool) {
+    if minimized {
+      self.winit_wnd.set_minimized(minimized);
+    } else {
+      self.winit_wnd.set_visible(true);
+      self.winit_wnd.set_minimized(minimized);
+    }
+  }
+
+  #[inline]
+  fn focus_window(&mut self) { self.winit_wnd.focus_window() }
+
+  #[inline]
+  fn set_decorations(&mut self, decorations: bool) { self.winit_wnd.set_decorations(decorations) }
 
   #[inline]
   fn as_any(&self) -> &dyn std::any::Any { self }
@@ -157,12 +195,6 @@ impl WinitShellWnd {
       cursor: CursorIcon::Default,
     }
   }
-
-  pub fn on_resize(&mut self, size: Size) {
-    let size: DeviceSize = (size * self.device_pixel_ratio()).to_i32().cast_unit();
-
-    self.backend.on_resize(size);
-  }
 }
 
 fn set_ime_allowed(wnd: &winit::window::Window) {
@@ -172,19 +204,21 @@ fn set_ime_allowed(wnd: &winit::window::Window) {
   // platform, issue link: https://github.com/rust-windowing/winit/issues/2780
   #[cfg(windows)]
   unsafe {
+    use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
     use std::ptr::null_mut;
     use winapi::{
       shared::minwindef::HINSTANCE,
       shared::windef::HWND,
       um::winuser::{CreateCaret, LoadBitmapW},
     };
-    use winit::platform::windows::WindowExtWindows;
 
-    let hwnd = wnd.hwnd();
-    let hinst: HINSTANCE = null_mut();
-    let resource_id = 120;
-    let resource_id_wstr: Vec<u16> = format!("#{}", resource_id).encode_utf16().collect();
-    let hcaret = LoadBitmapW(hinst, resource_id_wstr.as_ptr());
-    CreateCaret(hwnd as HWND, hcaret, 0, 0);
+    if let RawWindowHandle::Win32(handle) = wnd.raw_window_handle() {
+      let hwnd = handle.hwnd as *mut HWND;
+      let hinst: HINSTANCE = null_mut();
+      let resource_id = 120;
+      let resource_id_wstr: Vec<u16> = format!("#{}", resource_id).encode_utf16().collect();
+      let hcaret = LoadBitmapW(hinst, resource_id_wstr.as_ptr());
+      CreateCaret(hwnd as HWND, hcaret, 0, 0);
+    }
   }
 }

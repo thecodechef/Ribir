@@ -176,9 +176,9 @@ impl Compose for Wordle {
           e.chars.chars().for_each(|c| $this.write().guessing.enter_char(c))
         },
         on_key_down: move |e| {
-          match e.key {
-            VirtualKeyCode::Back => $this.write().guessing.delete_back_char(),
-            VirtualKeyCode::Return => {
+          match e.key() {
+            VirtualKey::Named(NamedKey::Backspace) => $this.write().guessing.delete_back_char(),
+            VirtualKey::Named(NamedKey::Enter) => {
               match $this.write().guess() {
                 Ok(status) => $state_bar.write().text = status.state_message().into(),
                 Err(e) => $state_bar.write().text = e.message().into(),

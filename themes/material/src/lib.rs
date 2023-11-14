@@ -1,5 +1,3 @@
-#![feature(return_position_impl_trait_in_trait)]
-
 use std::rc::Rc;
 
 use ribir_core::{fill_svgs, prelude::*};
@@ -269,12 +267,8 @@ fn override_compose_decorator(theme: &mut FullTheme) {
       let host = scrollbar_thumb(host, EdgeInsets::vertical(1.));
       let mut thumb = @ $host { left_anchor: pipe!($this.offset) };
 
-      let left_trans = map_writer!($thumb.left_anchor);
-      left_trans.transition_with(
-        transitions::LINEAR.of(ctx!()),
-        move |from, to, rate| PositionUnit::lerp(from, to, rate, $thumb.layout_width()),
-        ctx!()
-      );
+      map_writer!($thumb.left_anchor)
+        .transition(transitions::LINEAR.of(ctx!()), ctx!());
 
       thumb
     }
@@ -285,12 +279,8 @@ fn override_compose_decorator(theme: &mut FullTheme) {
       let host = scrollbar_thumb(host, EdgeInsets::vertical(1.));
       let mut thumb = @ $host { top_anchor: pipe!($this.offset) };
 
-      let top_trans = map_writer!($thumb.top_anchor);
-      top_trans.transition_with(
-        transitions::LINEAR.of(ctx!()),
-        move |from, to, rate| PositionUnit::lerp(from, to, rate, $thumb.layout_height()),
-        ctx!()
-      );
+      map_writer!($thumb.top_anchor)
+        .transition(transitions::LINEAR.of(ctx!()), ctx!());
 
       thumb
     }
@@ -322,21 +312,12 @@ fn override_compose_decorator(theme: &mut FullTheme) {
       let ease_in = transitions::EASE_IN.of(ctx!());
       match $style.pos {
         Position::Top | Position::Bottom => {
-          let left = map_writer!($indicator.left_anchor);
-          left.transition_with(
-            ease_in,
-            move |from, to, rate| PositionUnit::lerp(from, to, rate, $style.rect.width()),
-            ctx!()
-          );
-
+          map_writer!($indicator.left_anchor)
+            .transition(ease_in, ctx!());
         }
         Position::Left | Position::Right => {
-          let top = map_writer!($indicator.top_anchor);
-          top.transition_with(
-            ease_in,
-            move |from, to, rate| PositionUnit::lerp(from, to, rate, $style.rect.height()),
-            ctx!()
-          );
+          map_writer!($indicator.top_anchor)
+            .transition(ease_in, ctx!());
         }
       }
 

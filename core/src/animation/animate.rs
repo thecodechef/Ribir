@@ -7,37 +7,14 @@ where
   S: AnimateState + 'static,
 {
   #[declare(strict, default = transitions::LINEAR.of(ctx!()))]
-  pub transition: Box<dyn Roc>,
+  pub transition: Box<dyn Transition>,
   #[declare(strict)]
   pub state: S,
-  pub from: <S::State as StateReader>::Value,
+  pub from: S::Value,
   #[declare(skip)]
-  running_info: Option<AnimateInfo<<S::State as StateReader>::Value>>,
+  running_info: Option<AnimateInfo<S::Value>>,
   #[declare(skip, default = ctx!().window().id())]
   window_id: WindowId,
-}
-
-pub trait AnimateState {
-  type State: StateWriter;
-  fn state(&self) -> &Self::State;
-
-  fn calc_lerp_value(
-    &mut self,
-    from: &<Self::State as StateReader>::Value,
-    to: &<Self::State as StateReader>::Value,
-    rate: f32,
-  ) -> <Self::State as StateReader>::Value;
-}
-
-/// A state with a lerp function as an animation state that use the `lerp_fn`
-/// function to calc the linearly lerp value by rate, and not require the value
-/// type of the state to implement the `Lerp` trait.
-///
-/// User can use it if the value type of the state is not implement the `Lerp`
-/// or override the lerp algorithm of the value type of state.
-pub struct LerpFnState<S, F> {
-  lerp_fn: F,
-  state: S,
 }
 
 pub(crate) struct AnimateInfo<V> {
@@ -50,16 +27,17 @@ pub(crate) struct AnimateInfo<V> {
   _tick_msg_guard: Option<SubscriptionGuard<BoxSubscription<'static>>>,
 }
 
-pub trait AnimateRun<S>: StateWriter<Value = Animate<S>>
+impl<S, T> Animation for T
 where
   S: AnimateState + 'static,
-  <S::State as StateReader>::Value: Clone,
+  S::Value: Clone,
+  T: StateWriter<Value = Animate<S>>,
 {
   fn run(&self) {
     let mut animate_ref = self.write();
     let this = &mut *animate_ref;
     let wnd_id = this.window_id;
-    let new_to = this.state.state().read().clone();
+    let new_to = this.state.get();
 
     if let Some(AnimateInfo { from, to, last_progress, .. }) = &mut this.running_info {
       *from = this.state.calc_lerp_value(from, to, last_progress.value());
@@ -78,20 +56,21 @@ where
             if matches!(p, AnimateProgress::Finish) {
               let wnd = AppCtx::get_window(wnd_id).unwrap();
               let animate = animate.clone_writer();
-              wnd
-                .frame_spawn(async move { animate.silent().stop() })
-                .unwrap();
+              wnd.frame_spawn(async move { animate.stop() }).unwrap();
             } else {
-              animate.shallow().lerp_by_instant(time);
+              animate.shallow().advance_to(time);
             }
           }
           FrameMsg::LayoutReady(_) => {}
           // use silent_ref because the state of animate change, bu no need to effect the framework.
           FrameMsg::Finish(_) => {
-            let animate = &mut *animate.silent();
+            let mut animate = animate.write();
+            let data_value = animate.running_info.as_mut().unwrap().to.clone();
             let info = animate.running_info.as_mut().unwrap();
-            *animate.state.state().shallow() = info.to.clone();
             info.already_lerp = false;
+            animate.state.set(data_value);
+
+            animate.forget_modifies();
           }
         }
       });
@@ -108,24 +87,35 @@ where
       wnd.inc_running_animate();
     }
   }
-}
 
-impl<S, T> AnimateRun<S> for T
-where
-  S: AnimateState + 'static,
-  <S::State as StateReader>::Value: Clone,
-  T: StateWriter<Value = Animate<S>>,
-{
+  fn is_running(&self) -> bool { self.read().is_running() }
+
+  fn stop(&self) {
+    let mut this = self.silent();
+    if this.is_running() {
+      if let Some(wnd) = AppCtx::get_window(this.window_id) {
+        wnd.dec_running_animate();
+        this.running_info.take();
+      }
+    }
+  }
+
+  fn box_clone(&self) -> Box<dyn Animation> { Box::new(self.clone_writer()) }
 }
 
 impl<S> Animate<S>
 where
   S: AnimateState + 'static,
 {
-  fn lerp_by_instant(&mut self, now: Instant) -> AnimateProgress
-  where
-    <S::State as StateReader>::Value: Clone,
-  {
+  pub fn is_running(&self) -> bool { self.running_info.is_some() }
+
+  /// Advance the animation to the given time, you must start the animation
+  /// before calling this method, the `at` relative to the start time.
+  ///
+  /// ## Panics
+  ///
+  /// Panics if the animation is not running.
+  fn advance_to(&mut self, at: Instant) -> AnimateProgress {
     let AnimateInfo {
       from,
       to,
@@ -142,18 +132,17 @@ where
       return *last_progress;
     }
 
-    let elapsed = now - *start_at;
+    let elapsed = at - *start_at;
     let progress = self.transition.rate_of_change(elapsed);
 
     match progress {
       AnimateProgress::Between(rate) => {
         let value = self.state.calc_lerp_value(from, to, rate);
-        let state = &mut self.state.state().shallow();
         // the state may change during animate.
-        *to = state.clone();
-        **state = value;
+        *to = self.state.get();
+        self.state.set(value);
       }
-      AnimateProgress::Dismissed => *self.state.state().shallow() = from.clone(),
+      AnimateProgress::Dismissed => self.state.set(from.clone()),
       AnimateProgress::Finish => {}
     }
 
@@ -162,18 +151,6 @@ where
 
     progress
   }
-
-  pub fn stop(&mut self) {
-    if self.is_running() {
-      if let Some(wnd) = AppCtx::get_window(self.window_id) {
-        wnd.dec_running_animate();
-        self.running_info.take();
-      }
-    }
-  }
-
-  #[inline]
-  pub fn is_running(&self) -> bool { self.running_info.is_some() }
 }
 
 impl<P> Drop for Animate<P>
@@ -181,45 +158,12 @@ where
   P: AnimateState + 'static,
 {
   fn drop(&mut self) {
-    if self.is_running() {
-      if let Some(wnd) = AppCtx::get_window(self.window_id).filter(|_| self.is_running()) {
+    if self.running_info.is_some() {
+      if let Some(wnd) = AppCtx::get_window(self.window_id) {
         wnd.dec_running_animate();
       }
     }
   }
-}
-
-impl<V, S> AnimateState for S
-where
-  S: StateWriter<Value = V>,
-  V: Lerp,
-{
-  type State = S;
-
-  fn state(&self) -> &Self::State { self }
-
-  fn calc_lerp_value(&mut self, from: &V, to: &V, rate: f32) -> V { from.lerp(to, rate) }
-}
-
-impl<V, S, F> AnimateState for LerpFnState<S, F>
-where
-  S: StateWriter<Value = V>,
-  F: FnMut(&V, &V, f32) -> V,
-{
-  type State = S;
-
-  fn state(&self) -> &Self::State { &self.state }
-
-  fn calc_lerp_value(&mut self, from: &V, to: &V, rate: f32) -> V { (self.lerp_fn)(from, to, rate) }
-}
-
-impl<V, S, F> LerpFnState<S, F>
-where
-  S: StateReader<Value = V>,
-  F: FnMut(&V, &V, f32) -> V,
-{
-  #[inline]
-  pub fn new(state: S, lerp_fn: F) -> Self { Self { state, lerp_fn } }
 }
 
 #[cfg(test)]
@@ -234,7 +178,7 @@ mod tests {
 
     let w = fn_widget! {
       let animate = @Animate {
-        transition: Transition {
+        transition: EasingTransition {
           easing: easing::LINEAR,
           duration: Duration::ZERO,
         }.box_it(),

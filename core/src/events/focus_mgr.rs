@@ -151,7 +151,11 @@ impl FocusManager {
     node.remove_focus(focus_type);
 
     if Some(wid) == self.focusing && !node.has_focus_node() {
-      self.request_focusing = Some(None);
+      if let Some(Some(request_wid)) = self.request_focusing {
+        if request_wid == wid {
+          self.request_focusing = Some(None);
+        }
+      }
     }
 
     if node.is_empty() {
@@ -489,7 +493,7 @@ impl FocusManager {
 
   pub fn refresh_focus(&mut self) {
     self.refresh();
-    if self.focus_widgets.get(0) != self.focusing.as_ref() {
+    if self.focus_widgets.first() != self.focusing.as_ref() {
       self.change_focusing_to(self.focusing);
     }
   }

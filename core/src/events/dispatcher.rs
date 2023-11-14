@@ -1,7 +1,10 @@
 use crate::{prelude::*, widget_tree::WidgetTree, window::DelayEvent};
 use ribir_text::PIXELS_PER_EM;
 use std::rc::{Rc, Weak};
-use winit::event::{DeviceId, ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::{
+  event::{DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
+  keyboard::ModifiersState,
+};
 
 pub(crate) struct Dispatcher {
   wnd: Weak<Window>,
@@ -43,7 +46,7 @@ impl Dispatcher {
   pub fn dispatch(&mut self, event: WindowEvent, wnd_factor: f64) {
     log::info!("Dispatch winit event {:?}", event);
     match event {
-      WindowEvent::ModifiersChanged(s) => self.info.modifiers = s,
+      WindowEvent::ModifiersChanged(s) => self.info.modifiers = s.state(),
       WindowEvent::CursorMoved { position, .. } => {
         let pos = position.to_logical::<f32>(wnd_factor);
         self.cursor_move_to(Point::new(pos.x, pos.y))
@@ -52,34 +55,32 @@ impl Dispatcher {
       WindowEvent::MouseInput { state, button, device_id, .. } => {
         self.dispatch_mouse_input(device_id, state, button);
       }
-      WindowEvent::KeyboardInput { input, .. } => {
-        self.dispatch_keyboard_input(input);
-      }
-      WindowEvent::ReceivedCharacter(c) => {
-        self.add_chars_event(c.to_string());
-      }
-      WindowEvent::Ime(ime) => {
-        if let Ime::Commit(s) = ime {
-          self.add_chars_event(s)
-        }
-      }
       WindowEvent::MouseWheel { delta, .. } => self.dispatch_wheel(delta, wnd_factor),
       _ => log::info!("not processed event {:?}", event),
     }
   }
 
-  pub fn dispatch_keyboard_input(&mut self, input: winit::event::KeyboardInput) {
+  pub fn dispatch_keyboard_input(
+    &mut self,
+    physical_key: PhysicalKey,
+    key: VirtualKey,
+    is_repeat: bool,
+    location: KeyLocation,
+    state: ElementState,
+  ) {
     let wnd = self.window();
-    if let (Some(key), Some(id)) = (input.virtual_keycode, wnd.focusing()) {
-      let scancode = input.scancode;
-      match input.state {
-        ElementState::Pressed => wnd.add_delay_event(DelayEvent::KeyDown { id, scancode, key }),
-        ElementState::Released => wnd.add_delay_event(DelayEvent::KeyUp { id, scancode, key }),
+    if let Some(focus_id) = wnd.focusing() {
+      let event = KeyboardEvent::new(wnd.id(), focus_id, physical_key, key, is_repeat, location);
+      match state {
+        ElementState::Pressed => {
+          wnd.add_delay_event(DelayEvent::KeyDown(event));
+        }
+        ElementState::Released => wnd.add_delay_event(DelayEvent::KeyUp(event)),
       };
     }
   }
 
-  pub fn add_chars_event(&mut self, chars: String) {
+  pub fn dispatch_receive_chars(&mut self, chars: String) {
     let wnd = self.window();
     if let Some(focus) = wnd.focusing() {
       self
@@ -275,7 +276,7 @@ mod tests {
   use crate::{reset_test_env, test_helper::*};
   use std::{cell::RefCell, rc::Rc};
   use winit::event::WindowEvent;
-  use winit::event::{DeviceId, ElementState, ModifiersState, MouseButton};
+  use winit::event::{DeviceId, ElementState, MouseButton};
 
   struct Info {
     pos: Point,
@@ -324,11 +325,7 @@ mod tests {
 
     let device_id = unsafe { DeviceId::dummy() };
     #[allow(deprecated)]
-    wnd.processes_native_event(WindowEvent::CursorMoved {
-      device_id,
-      position: (1., 1.).into(),
-      modifiers: ModifiersState::default(),
-    });
+    wnd.processes_native_event(WindowEvent::CursorMoved { device_id, position: (1., 1.).into() });
     wnd.run_frame_tasks();
     {
       let mut records = event_record.borrow_mut();
@@ -342,7 +339,6 @@ mod tests {
       device_id,
       state: ElementState::Pressed,
       button: MouseButton::Left,
-      modifiers: ModifiersState::default(),
     });
     wnd.run_frame_tasks();
     let mut records = event_record.borrow_mut();
@@ -369,7 +365,6 @@ mod tests {
       device_id,
       state: ElementState::Pressed,
       button: MouseButton::Left,
-      modifiers: ModifiersState::default(),
     });
     wnd.run_frame_tasks();
 
@@ -378,16 +373,11 @@ mod tests {
       device_id,
       state: ElementState::Pressed,
       button: MouseButton::Right,
-      modifiers: ModifiersState::default(),
     });
     wnd.run_frame_tasks();
 
     #[allow(deprecated)]
-    wnd.processes_native_event(WindowEvent::CursorMoved {
-      device_id,
-      position: (1, 1).into(),
-      modifiers: ModifiersState::default(),
-    });
+    wnd.processes_native_event(WindowEvent::CursorMoved { device_id, position: (1, 1).into() });
     wnd.run_frame_tasks();
 
     #[allow(deprecated)]
@@ -395,7 +385,6 @@ mod tests {
       device_id,
       state: ElementState::Released,
       button: MouseButton::Left,
-      modifiers: ModifiersState::default(),
     });
     wnd.run_frame_tasks();
 
@@ -404,7 +393,6 @@ mod tests {
       device_id,
       state: ElementState::Released,
       button: MouseButton::Right,
-      modifiers: ModifiersState::default(),
     });
     wnd.run_frame_tasks();
     let records = event_record.borrow();
@@ -438,7 +426,6 @@ mod tests {
       device_id,
       state: ElementState::Pressed,
       button: MouseButton::Left,
-      modifiers: ModifiersState::default(),
     });
     wnd.run_frame_tasks();
     assert_eq!(event_record.borrow().len(), 1);
@@ -454,7 +441,6 @@ mod tests {
       device_id: device_id_2,
       state: ElementState::Pressed,
       button: MouseButton::Left,
-      modifiers: ModifiersState::default(),
     });
 
     #[allow(deprecated)]
@@ -462,7 +448,6 @@ mod tests {
       device_id: device_id_2,
       state: ElementState::Released,
       button: MouseButton::Left,
-      modifiers: ModifiersState::default(),
     });
     wnd.run_frame_tasks();
     assert_eq!(event_record.borrow().len(), 1);
@@ -471,7 +456,6 @@ mod tests {
     wnd.processes_native_event(WindowEvent::CursorMoved {
       device_id: device_id_2,
       position: (1, 1).into(),
-      modifiers: ModifiersState::default(),
     });
     wnd.run_frame_tasks();
     // but cursor move processed.
@@ -484,7 +468,6 @@ mod tests {
       device_id,
       state: ElementState::Released,
       button: MouseButton::Left,
-      modifiers: ModifiersState::default(),
     });
     wnd.run_frame_tasks();
     assert_eq!(event_record.borrow().len(), 3);
@@ -525,7 +508,6 @@ mod tests {
       device_id: unsafe { DeviceId::dummy() },
       state: ElementState::Pressed,
       button: MouseButton::Left,
-      modifiers: ModifiersState::default(),
     });
     wnd.run_frame_tasks();
     assert_eq!(event_record.borrow().len(), 1);
@@ -569,32 +551,20 @@ mod tests {
     let device_id = unsafe { DeviceId::dummy() };
 
     #[allow(deprecated)]
-    wnd.processes_native_event(WindowEvent::CursorMoved {
-      device_id,
-      position: (10, 10).into(),
-      modifiers: ModifiersState::default(),
-    });
+    wnd.processes_native_event(WindowEvent::CursorMoved { device_id, position: (10, 10).into() });
     wnd.run_frame_tasks();
     assert_eq!(&*enter_event.borrow(), &[2, 1]);
 
     // leave to parent
     #[allow(deprecated)]
-    wnd.processes_native_event(WindowEvent::CursorMoved {
-      device_id,
-      position: (99, 99).into(),
-      modifiers: ModifiersState::default(),
-    });
+    wnd.processes_native_event(WindowEvent::CursorMoved { device_id, position: (99, 99).into() });
     wnd.run_frame_tasks();
     assert_eq!(&*leave_event.borrow(), &[1]);
 
     // move in same widget,
     // check if duplicate event fired.
     #[allow(deprecated)]
-    wnd.processes_native_event(WindowEvent::CursorMoved {
-      device_id,
-      position: (99, 99).into(),
-      modifiers: ModifiersState::default(),
-    });
+    wnd.processes_native_event(WindowEvent::CursorMoved { device_id, position: (99, 99).into() });
     wnd.run_frame_tasks();
     assert_eq!(&*enter_event.borrow(), &[2, 1]);
     assert_eq!(&*leave_event.borrow(), &[1]);
@@ -604,7 +574,6 @@ mod tests {
     wnd.processes_native_event(WindowEvent::CursorMoved {
       device_id,
       position: (999, 999).into(),
-      modifiers: ModifiersState::default(),
     });
     wnd.run_frame_tasks();
     assert_eq!(&*leave_event.borrow(), &[1, 2]);
@@ -612,11 +581,7 @@ mod tests {
     // leave event trigger by window left.
     leave_event.borrow_mut().clear();
     #[allow(deprecated)]
-    wnd.processes_native_event(WindowEvent::CursorMoved {
-      device_id,
-      position: (10, 10).into(),
-      modifiers: ModifiersState::default(),
-    });
+    wnd.processes_native_event(WindowEvent::CursorMoved { device_id, position: (10, 10).into() });
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::CursorLeft { device_id });
     wnd.run_frame_tasks();
@@ -647,27 +612,23 @@ mod tests {
     wnd.draw_frame();
 
     let device_id = unsafe { DeviceId::dummy() };
-    let modifiers = ModifiersState::default();
 
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::CursorMoved {
       device_id,
       position: (50f64, 50f64).into(),
-      modifiers,
     });
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::MouseInput {
       device_id,
       state: ElementState::Pressed,
       button: MouseButton::Left,
-      modifiers,
     });
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::MouseInput {
       device_id,
       state: ElementState::Released,
       button: MouseButton::Left,
-      modifiers,
     });
     wnd.run_frame_tasks();
     assert_eq!(*click_path.read(), [1, 2, 3, 4]);
@@ -695,27 +656,23 @@ mod tests {
     wnd.draw_frame();
 
     let device_id = unsafe { DeviceId::dummy() };
-    let modifiers = ModifiersState::default();
 
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::CursorMoved {
       device_id,
       position: (50f64, 50f64).into(),
-      modifiers,
     });
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::MouseInput {
       device_id,
       state: ElementState::Pressed,
       button: MouseButton::Left,
-      modifiers,
     });
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::MouseInput {
       device_id,
       state: ElementState::Released,
       button: MouseButton::Left,
-      modifiers,
     });
 
     wnd.run_frame_tasks();
@@ -729,27 +686,23 @@ mod tests {
     wnd.processes_native_event(WindowEvent::CursorMoved {
       device_id,
       position: (50f64, 50f64).into(),
-      modifiers,
     });
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::MouseInput {
       device_id,
       state: ElementState::Pressed,
       button: MouseButton::Left,
-      modifiers,
     });
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::CursorMoved {
       device_id,
       position: (50f64, 150f64).into(),
-      modifiers,
     });
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::MouseInput {
       device_id,
       state: ElementState::Released,
       button: MouseButton::Left,
-      modifiers,
     });
     wnd.run_frame_tasks();
     assert_eq!(*click_path.read(), 1);
@@ -774,19 +727,16 @@ mod tests {
     wnd.draw_frame();
 
     let device_id = unsafe { DeviceId::dummy() };
-    let modifiers = ModifiersState::default();
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::CursorMoved {
       device_id,
       position: (45f64, 45f64).into(),
-      modifiers,
     });
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::MouseInput {
       device_id,
       state: ElementState::Pressed,
       button: MouseButton::Left,
-      modifiers,
     });
 
     // point down on a focus widget
@@ -797,20 +747,17 @@ mod tests {
       device_id,
       state: ElementState::Released,
       button: MouseButton::Left,
-      modifiers,
     });
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::CursorMoved {
       device_id,
       position: (80f64, 80f64).into(),
-      modifiers,
     });
     #[allow(deprecated)]
     wnd.processes_native_event(WindowEvent::MouseInput {
       device_id,
       state: ElementState::Pressed,
       button: MouseButton::Left,
-      modifiers,
     });
 
     assert!(wnd.focus_mgr.borrow().focusing().is_none());

@@ -1,11 +1,11 @@
 use super::easing::Easing;
 use crate::prelude::{BuildCtx, *};
+use ribir_algo::Sc;
 use std::time::Duration;
 
-/// Transition use rate to describe how the state change form init to final
-/// smoothly.
+/// Transition use `Easing` trait to calc the rate of change over time.
 #[derive(Clone, Debug)]
-pub struct Transition<E: 'static> {
+pub struct EasingTransition<E: 'static> {
   pub duration: Duration,
   pub easing: E,
 }
@@ -27,24 +27,22 @@ pub struct RepeatTransition<T> {
 /// Trait help to transition the state.
 pub trait TransitionState: Sized + 'static {
   /// Use an animate to transition the state after it modified.
-  fn transition(self, transition: Box<dyn Roc>, ctx: &BuildCtx) -> Writer<Animate<Self>>
+  fn transition(self, transition: Box<dyn Transition>, ctx: &BuildCtx) -> Writer<Animate<Self>>
   where
     Self: AnimateState,
-    <Self::State as StateReader>::Value: Clone,
   {
-    let state = self.state().clone_writer();
-    let from = state.read().clone();
+    let state = self.clone_setter();
     let animate: State<Animate<Self>> = Animate::declare_builder()
       .transition(transition)
-      .from(from)
+      .from(self.get())
       .state(self)
       .build_declare(ctx);
 
     let c_animate = animate.clone_writer();
-    let init_value = observable::of(state.read().clone());
+    let init_value = observable::of(state.get());
     state
-      .modifies()
-      .map(move |_| state.read().clone())
+      .animate_state_modifies()
+      .map(move |_| state.get())
       .merge(init_value)
       .pairwise()
       .subscribe(move |(old, _)| {
@@ -53,17 +51,19 @@ pub trait TransitionState: Sized + 'static {
       });
     c_animate
   }
+}
 
-  /// Transition the state with a lerp function.
+impl<S: AnimateState + 'static> TransitionState for S {}
+
+/// Transition the state with a lerp function.
+pub trait TransitionWithFn: AnimateStateSetter + Sized {
   fn transition_with<F>(
     self,
-    transition: Box<dyn Roc>,
+    transition: Box<dyn Transition>,
     lerp_fn: F,
     ctx: &BuildCtx,
   ) -> Writer<Animate<LerpFnState<Self, F>>>
   where
-    Self: StateWriter,
-    Self::Value: Clone,
     F: FnMut(&Self::Value, &Self::Value, f32) -> Self::Value + 'static,
   {
     let animate_state = LerpFnState::new(self, lerp_fn);
@@ -71,8 +71,10 @@ pub trait TransitionState: Sized + 'static {
   }
 }
 
-/// Calc the rate of change over time.
-pub trait Roc {
+impl<S> TransitionWithFn for S where S: AnimateStateSetter {}
+
+/// Transition is a trait to help you calc the rate of change over time.
+pub trait Transition {
   /// Calc the rate of change of the duration from animation start.
   fn rate_of_change(&self, dur: Duration) -> AnimateProgress;
 
@@ -95,7 +97,7 @@ pub trait Roc {
     DelayTransition { delay, transition: self }
   }
 
-  fn box_it(self) -> Box<dyn Roc>
+  fn box_it(self) -> Box<dyn Transition>
   where
     Self: Sized + 'static,
   {
@@ -103,15 +105,15 @@ pub trait Roc {
   }
 }
 
-pub trait RocBoxClone: Roc {
-  fn box_clone(&self) -> Box<dyn Roc>;
+pub trait RocBoxClone: Transition {
+  fn box_clone(&self) -> Box<dyn Transition>;
 }
 
-impl<T: Roc + Clone + 'static> RocBoxClone for T {
-  fn box_clone(&self) -> Box<dyn Roc> { self.clone().box_it() }
+impl<T: Transition + Clone + 'static> RocBoxClone for T {
+  fn box_clone(&self) -> Box<dyn Transition> { self.clone().box_it() }
 }
 
-impl<T: Roc> Roc for DelayTransition<T> {
+impl<T: Transition> Transition for DelayTransition<T> {
   fn rate_of_change(&self, dur: Duration) -> AnimateProgress {
     if dur < self.delay {
       return AnimateProgress::Dismissed;
@@ -122,7 +124,7 @@ impl<T: Roc> Roc for DelayTransition<T> {
   fn duration(&self) -> Duration { self.delay + self.transition.duration() }
 }
 
-impl<T: Roc> Roc for RepeatTransition<T> {
+impl<T: Transition> Transition for RepeatTransition<T> {
   fn rate_of_change(&self, dur: Duration) -> AnimateProgress {
     let repeat = self.repeat;
     let duration = self.transition.duration();
@@ -148,7 +150,19 @@ impl<T: Roc> Roc for RepeatTransition<T> {
   }
 }
 
-impl<E: Easing> Roc for Transition<E> {
+impl Transition for Box<dyn Transition> {
+  fn rate_of_change(&self, dur: Duration) -> AnimateProgress { (**self).rate_of_change(dur) }
+
+  fn duration(&self) -> Duration { (**self).duration() }
+}
+
+impl<T: Transition> Transition for Sc<T> {
+  fn rate_of_change(&self, dur: Duration) -> AnimateProgress { (**self).rate_of_change(dur) }
+
+  fn duration(&self) -> Duration { (**self).duration() }
+}
+
+impl<E: Easing> Transition for EasingTransition<E> {
   fn rate_of_change(&self, run_dur: Duration) -> AnimateProgress {
     if run_dur > self.duration {
       return AnimateProgress::Finish;
@@ -159,13 +173,4 @@ impl<E: Easing> Roc for Transition<E> {
   }
 
   fn duration(&self) -> Duration { self.duration }
-}
-
-impl<S: StateWriter + 'static> TransitionState for S {}
-
-impl<V, S, F> TransitionState for LerpFnState<S, F>
-where
-  S: StateWriter<Value = V> + 'static,
-  F: FnMut(&V, &V, f32) -> V + 'static,
-{
 }

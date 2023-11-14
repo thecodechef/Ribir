@@ -67,67 +67,66 @@ impl Compose for Todos {
 impl Todos {
   fn pane(this: impl StateWriter<Value = Self>, cond: fn(&Task) -> bool) -> impl WidgetBuilder {
     fn_widget! {
-      // todo: pipe only for list items, not lists
-      @VScrollBar { @ { pipe! {
-        let mount_task_cnt = Stateful::new(0);
+      @VScrollBar { @ {
+        let stagger = Stagger::new(Duration::from_millis(100), transitions::EASE_IN.of(ctx!()));
+        let c_stagger = stagger.clone_writer().into_inner();
 
         @Lists {
-          // when performed layout, means all task are mounted, we reset the mount count.
-          on_performed_layout: move |_| *$mount_task_cnt.write() = 0,
+          on_mounted: move |_| stagger.run(),
           padding: EdgeInsets::vertical(8.),
           @ {
-            $this
+            pipe!($this;).map(move |_| {
+              $this
               .tasks
               .iter()
               .enumerate()
               .filter_map(move |(idx, task)| { cond(task).then_some(idx) })
               .map(move |idx| {
+
+                let mut item = @ListItem { };
+                if !$c_stagger.has_ever_run() {
+                  $item.write().opacity = 0.;
+
+                  let fly_in = $c_stagger.write().push_state(
+                    (map_writer!($item.transform), map_writer!($item.opacity)),
+                    (Transform::translation(0., 200. ), 0.),
+                    ctx!()
+                  );
+
+                  watch!($fly_in.is_running()).filter(|v| *v).first().subscribe(move |_| {
+                    $item.write().opacity = 1.;
+                  });
+                }
+
                 let task = split_writer!($this.tasks[idx]);
-                let mut key = @KeyWidget { key: $task.id, value: () };
-                let mount_idx = Stateful::new(0);
-
-                let mount_animate = @Animate {
-                  state: map_writer!($key.transform),
-                  from: Transform::translation(-400., 0. ),
-                };
-                @ $key {
-                  @ListItem {
-                    on_mounted: move |_| if $key.is_enter() {
-                      *$mount_idx.write() = *$mount_task_cnt;
-                      *$mount_task_cnt.write() += 1;
-                      $mount_animate.write().transition = Transition {
-                        duration: Duration::from_millis(450),
-                        easing: easing::EASE_IN,
-                      }.delay(Duration::from_millis(100 * *$mount_idx)).box_it();
-
-                      mount_animate.run();
-                    },
-                    @{ HeadlineText(Label::new($task.label.clone())) }
-                    @Leading {
-                      @{
-                        let checkbox = @Checkbox {
-                          checked: pipe!($task.finished),
-                          margin: EdgeInsets::vertical(4.),
-                        };
-                        watch!($checkbox.checked)
-                          .distinct_until_changed()
-                          .subscribe(move |v| $task.write().finished = v);
-                        CustomEdgeWidget(checkbox.widget_build(ctx!()))
-                      }
-                    }
-                    @Trailing {
-                      cursor: CursorIcon::Hand,
-                      visible: $key.mouse_hover(),
-                      on_tap: move |_| { $this.write().tasks.remove(idx); },
-                      @{ svgs::CLOSE }
+                @$item {
+                  @{ HeadlineText(Label::new($task.label.clone())) }
+                  @Leading {
+                    @{
+                      let checkbox = @Checkbox {
+                        checked: pipe!($task.finished),
+                        margin: EdgeInsets::vertical(4.),
+                      };
+                      watch!($checkbox.checked)
+                        .distinct_until_changed()
+                        .subscribe(move |v| $task.write().finished = v);
+                      CustomEdgeWidget(checkbox.widget_build(ctx!()))
                     }
                   }
+                  @Trailing {
+                    cursor: CursorIcon::Pointer,
+                    visible: $item.mouse_hover(),
+                    on_tap: move |_| { $this.write().tasks.remove(idx); },
+                    @{ svgs::CLOSE }
+                  }
                 }
+
               }).collect::<Vec<_>>()
+            })
           }
 
         }
-      }}}
+      }}
     }
   }
 

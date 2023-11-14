@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use std::cell::Cell;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum BoxFit {
   /// Widget will not be scale.
   None,
