@@ -1,0 +1,37 @@
+name: Test
+
+on:
+  push:
+    branches: [ "*" ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  CARGO_TERM_COLOR: always
+  TARGET: thumbv6m-none-eabi
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - rust: stable
+            features: std
+          - rust: stable
+            features: serde
+          - rust: beta
+            features:
+          - rust: nightly
+            features:
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+    - name: Run tests
+      run: cargo test --verbose --features "${{ matrix.features }}"
+    - name: Run tests in release mode
+      run: cargo test --release --verbose --features "${{ matrix.features }}"
+    

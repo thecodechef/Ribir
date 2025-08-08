@@ -1,0 +1,22 @@
+[package]
+name = "gitignore"
+version = "1.0.8"
+authors = ["Nathan Kleyn <nathan@nathankleyn.com>"]
+description = "DEPRECATED, SEE README! Pereviously, an implementation of .gitignore file parsing and glob testing in Rust."
+license = "MIT OR Apache-2.0"
+documentation = "https://nathankleyn.com/gitignore.rs/gitignore/"
+repository = "https://github.com/nathankleyn/gitignore.rs"
+
+[dependencies]
+glob = "0.3"
+
+[dev-dependencies]
+tempdir = "0.3.5"
+
+[features]
+# Whether or not to enable compilation of features that only work on nightly. This is currently only benchmarks that
+# need this.
+nightly = []
+
+[badges]
+maintenance = { status = "deprecated" }

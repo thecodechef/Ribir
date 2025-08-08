@@ -1,0 +1,16 @@
+[package]
+name = "tokio-run-until-stalled"
+authors = ["wjian23 <w_jian23@163.com>"]
+version = "0.1.0"
+edition = "2021"
+description = "Extends Tokio with run_until_stalled functionality"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/wjian23/tokio_run_until_stalled"
+
+[dependencies]
+tokio = { version = "1", features = ["rt"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "sync", "time", "rt", "rt-multi-thread"] }
+
+
